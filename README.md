@@ -29,6 +29,46 @@ pip install -r requirements.txt
 
 ### 4. Run the script
 ```bash
+# You can run without arguments (menu mode)
 python geant4_3d_viewer.py
 ```
-*The files must be in the same folder as the script*
+
+### Examples of usage
+Positional arguments
+```bash
+# Auto-Deduction of the .raw file
+python geant4_3d_viewer.py data.mhd
+
+# Specified .raw file
+python geant4_3d_viewer.py data.mhd data.raw
+```
+Named arguments
+```bash
+python geant4_3d_viewer.py --mhd data.mhd --raw data.raw
+python geant4_3d_viewer.py -m data.mhd -r data.raw
+```
+Direct visualization
+```bash
+# Run with Plotly
+python geant4_3d_viewer.py data.mhd --mode plotly
+
+# Show all visualizations
+python geant4_3d_viewer.py data.mhd --mode all
+
+# Other modes: slices, matplotlib, menu
+```
+Advanced
+```bash
+# Change treshold
+python geant4_3d_viewer.py data.mhd --threshold 90
+
+# Show all voxels
+python geant4_3d_viewer.py data.mhd --show-all
+
+# Combinations
+python geant4_3d_viewer.py data.mhd --mode plotly --show-all
+
+# help
+python geant4_3d_viewer.py --help
+python geant4_3d_viewer.py -h
+```
