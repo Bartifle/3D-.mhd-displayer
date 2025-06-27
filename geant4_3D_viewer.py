@@ -6,16 +6,40 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.widgets import Slider
 import plotly.graph_objects as go
 import plotly.express as px
+import argparse
+import os
+import sys
 
 class Geant4Viewer:
-    def __init__(self, mhd_file, raw_file):
+    def __init__(self, mhd_file, raw_file=None):
         """
         Initialise le visualiseur avec les fichiers .mhd et .raw
+        Si raw_file n'est pas spécifié, on essaie de le déduire du fichier .mhd
         """
         self.mhd_file = mhd_file
-        self.raw_file = raw_file
+        
+        # Si pas de fichier raw spécifié, on essaie de le déduire
+        if raw_file is None:
+            # Remplacer .mhd par .raw
+            if mhd_file.endswith('.mhd'):
+                self.raw_file = mhd_file.replace('.mhd', '.raw')
+            else:
+                raise ValueError("Fichier .mhd requis ou spécifiez le fichier .raw")
+        else:
+            self.raw_file = raw_file
+            
+        # Vérifier que les fichiers existent
+        if not os.path.exists(self.mhd_file):
+            raise FileNotFoundError(f"Fichier .mhd introuvable: {self.mhd_file}")
+        if not os.path.exists(self.raw_file):
+            raise FileNotFoundError(f"Fichier .raw introuvable: {self.raw_file}")
+            
         self.data = None
         self.metadata = {}
+        
+        print(f"Chargement des fichiers:")
+        print(f"  .mhd: {self.mhd_file}")
+        print(f"  .raw: {self.raw_file}")
         
         self.load_data()
     
@@ -150,9 +174,7 @@ class Geant4Viewer:
         values_filtered = self.data[mask]
         
         # Scatter plot 3D avec couleurs selon l'énergie
-        scatter = ax.scatter(x_filtered, y_filtered, z_filtered, 
-                           c=values_filtered, cmap='plasma', 
-                           s=20, alpha=0.6)
+        scatter = ax.scatter(x_filtered, y_filtered, z_filtered, c=values_filtered, cmap='plasma', s=20, alpha=0.6)
         
         ax.set_xlabel('X (mm)')
         ax.set_ylabel('Y (mm)')
@@ -220,41 +242,7 @@ class Geant4Viewer:
         
         fig.show()
     
-    def plot_volume_rendering(self):
-        """
-        Rendu volumique avec Plotly
-        """
-        # Sous-échantillonner si nécessaire pour les performances
-        step = max(1, max(self.dim_size) // 50)
-        data_subsampled = self.data[::step, ::step, ::step]
-        
-        # Coordonnées
-        x = np.arange(0, self.dim_size[0], step) * self.element_spacing[0] + self.offset[0]
-        y = np.arange(0, self.dim_size[1], step) * self.element_spacing[1] + self.offset[1]
-        z = np.arange(0, self.dim_size[2], step) * self.element_spacing[2] + self.offset[2]
-        
-        fig = go.Figure(data=go.Volume(
-            x=x,
-            y=y,
-            z=z,
-            value=data_subsampled.flatten(),
-            isomin=0.1 * np.max(data_subsampled),
-            isomax=np.max(data_subsampled),
-            opacity=0.1,
-            surface_count=15,
-            colorscale='Plasma'
-        ))
-        
-        fig.update_layout(
-            title='Rendu volumique - Dépôt d\'énergie',
-            scene=dict(
-                xaxis_title='X (mm)',
-                yaxis_title='Y (mm)',
-                zaxis_title='Z (mm)'
-            )
-        )
-        
-        fig.show()
+
     
     def get_statistics(self):
         """
@@ -271,56 +259,150 @@ class Geant4Viewer:
         print(f"Énergie maximale: {np.max(self.data):.4e} MeV")
         print(f"Énergie minimale (>0): {np.min(self.data[self.data > 0]):.4e} MeV")
 
+def parse_arguments():
+    """
+    Parse les arguments de ligne de commande
+    """
+    parser = argparse.ArgumentParser(
+        description='Visualiseur 3D pour les données de dépôt d\'énergie Geant4',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+            Exemples d'utilisation:
+            python geant4_3d_viewer.py data.mhd
+            python geant4_3d_viewer.py data.mhd data.raw
+            python geant4_3d_viewer.py --mhd data.mhd --raw data.raw
+            python geant4_3d_viewer.py -m data.mhd -r data.raw --mode plotly
+        '''
+    )
+    
+    # Arguments positionnels
+    parser.add_argument('mhd_file', nargs='?', help='Fichier .mhd (métadonnées)')
+    parser.add_argument('raw_file', nargs='?', help='Fichier .raw (données binaires, optionnel)')
+    
+    # Arguments optionnels
+    parser.add_argument('-m', '--mhd', dest='mhd_file_alt', help='Fichier .mhd (alternative)')
+    parser.add_argument('-r', '--raw', dest='raw_file_alt', help='Fichier .raw (alternative)')
+    
+    # Mode de visualisation
+    parser.add_argument('--mode', choices=['menu', 'slices', 'matplotlib', 'plotly', 'all'], default='menu', help='Mode de visualisation (défaut: menu)')
+    
+    # Options d'affichage
+    parser.add_argument('--show-all', action='store_true', help='Montrer tous les voxels (pas de seuil)')
+    parser.add_argument('--threshold', type=float, default=50, help='Percentile de seuil pour filtrer les voxels (défaut: 50)')
+    
+    args = parser.parse_args()
+    
+    # Déterminer les fichiers à utiliser
+    mhd_file = args.mhd_file or args.mhd_file_alt
+    raw_file = args.raw_file or args.raw_file_alt
+    
+    if not mhd_file:
+        parser.error("Un fichier .mhd est requis")
+    
+    return mhd_file, raw_file, args
+
+def interactive_file_selection():
+    """
+    Sélection interactive des fichiers si pas d'arguments
+    """
+    print("=== SÉLECTION DES FICHIERS ===")
+    
+    while True:
+        mhd_file = input("Chemin vers le fichier .mhd: ").strip()
+        if os.path.exists(mhd_file):
+            break
+        print(f"Fichier introuvable: {mhd_file}")
+    
+    # Essayer de déduire le fichier .raw
+    raw_file_auto = mhd_file.replace('.mhd', '.raw') if mhd_file.endswith('.mhd') else None
+    
+    if raw_file_auto and os.path.exists(raw_file_auto):
+        use_auto = input(f"Utiliser {raw_file_auto} ? (o/n): ").strip().lower()
+        if use_auto in ['o', 'oui', 'y', 'yes', '']:
+            return mhd_file, raw_file_auto
+    
+    while True:
+        raw_file = input("Chemin vers le fichier .raw: ").strip()
+        if os.path.exists(raw_file):
+            break
+        print(f"Fichier introuvable: {raw_file}")
+    
+    return mhd_file, raw_file
+
 # Exemple d'utilisation
 if __name__ == "__main__":
-    # Remplace par tes fichiers
-    mhd_file = "test008-edep_edep.mhd"
-    raw_file = "test008-edep_edep.raw"
-    
-    # Créer le visualiseur
-    viewer = Geant4Viewer(mhd_file, raw_file)
-    
-    # Afficher les statistiques
-    viewer.get_statistics()
-    
-    # Menu interactif
-    print("\n=== MENU DE VISUALISATION ===")
-    print("1. Visualiseur de coupes")
-    print("2. Visualisation 3D (matplotlib)")
-    print("3. Visualisation 3D interactive (Plotly)")
-    print("4. Rendu volumique")
-    print("5. Toutes les visualisations")
-    
-    choice = input("\nChoisis une option (1-5): ")
-    
-    if choice == "1":
-        print("\nVisualiseur de coupes...")
-        viewer.plot_slice_viewer()
-    elif choice == "2":
-        print("\nVisualisation 3D (matplotlib)...")
-        viewer.plot_3d_matplotlib(show_all=True)
-    elif choice == "3":
-        print("\nVisualisation 3D interactive (Plotly)...")
-        viewer.plot_3d_plotly(show_all=True)
-    elif choice == "4":
-        print("\nRendu volumique...")
-        viewer.plot_volume_rendering()
-    elif choice == "5":
-        print("\n1. Visualiseur de coupes...")
-        viewer.plot_slice_viewer()
+    try:
+        # Essayer de parser les arguments
+        if len(sys.argv) > 1:
+            mhd_file, raw_file, args = parse_arguments()
+        else:
+            # Sélection interactive si pas d'arguments
+            mhd_file, raw_file = interactive_file_selection()
+            # Créer un objet args par défaut
+            class DefaultArgs:
+                mode = 'menu'
+                show_all = False
+                threshold = 5
+            args = DefaultArgs()
         
-        input("Appuie sur Entrée pour continuer vers la visualisation 3D matplotlib...")
-        print("\n2. Visualisation 3D (matplotlib)...")
-        viewer.plot_3d_matplotlib(show_all=True)
+        # Créer le visualiseur
+        viewer = Geant4Viewer(mhd_file, raw_file)
         
-        input("Appuie sur Entrée pour continuer vers la visualisation 3D interactive...")
-        print("\n3. Visualisation 3D interactive (Plotly)...")
-        viewer.plot_3d_plotly(show_all=True)
+        # Afficher les statistiques
+        viewer.get_statistics()
         
-        input("Appuie sur Entrée pour continuer vers le rendu volumique...")
-        print("\n4. Rendu volumique...")
-        viewer.plot_volume_rendering()
-    else:
-        print("Option invalide!")
+        # Exécuter selon le mode choisi
+        if args.mode == 'menu':
+            # Menu interactif
+            print("\n=== MENU DE VISUALISATION ===")
+            print("1. Visualiseur de coupes")
+            print("2. Visualisation 3D (matplotlib)")
+            print("3. Visualisation 3D interactive (Plotly)")
+            print("4. Toutes les visualisations")
+            
+            choice = input("\nChoisis une option (1-4): ")
+            
+            if choice == "1":
+                print("\nVisualiseur de coupes...")
+                viewer.plot_slice_viewer()
+            elif choice == "2":
+                print("\nVisualisation 3D (matplotlib)...")
+                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+            elif choice == "3":
+                print("\nVisualisation 3D interactive (Plotly)...")
+                viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
+            elif choice == "4":
+                print("\n1. Visualiseur de coupes...")
+                viewer.plot_slice_viewer()
+                
+                input("Appuie sur Entrée pour continuer vers la visualisation 3D matplotlib...")
+                print("\n2. Visualisation 3D (matplotlib)...")
+                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+                
+                input("Appuie sur Entrée pour continuer vers la visualisation 3D interactive...")
+                print("\n3. Visualisation 3D interactive (Plotly)...")
+                viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
+            else:
+                print("Option invalide!")
+                
+        elif args.mode == 'slices':
+            viewer.plot_slice_viewer()
+        elif args.mode == 'matplotlib':
+            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+        elif args.mode == 'plotly':
+            viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
+        elif args.mode == 'all':
+            viewer.plot_slice_viewer()
+            input("Appuie sur Entrée pour continuer...")
+            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+            input("Appuie sur Entrée pour continuer...")
+            viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
         
-    print("\nTerminé!")
+        print("\nTerminé!")
+        
+    except KeyboardInterrupt:
+        print("\n\nArrêt demandé par l'utilisateur.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nErreur: {e}")
+        sys.exit(1)
