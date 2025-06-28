@@ -1,5 +1,6 @@
 # 3D-mhd-displayer
 Displays in point cloud, the data stored in .raw with .mhd file.
+Using Plotly (in Browser), Matplotlib (Slices view and 3D view)
 
 ## Installation and Usage
 
