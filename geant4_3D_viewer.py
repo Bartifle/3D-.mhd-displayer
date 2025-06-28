@@ -102,49 +102,188 @@ class Geant4Viewer:
         self.parse_mhd_file()
         self.load_raw_data()
     
-    def plot_slice_viewer(self):
+    def plot_slice_viewer(self, block=True):
         """
-        Visualiseur de coupes avec slider interactif
+        Visualiseur de coupes avec sliders interactifs pour naviguer
+        Layout optimisé avec espacement correct
         """
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle('Visualiseur de coupes - Dépôt d\'énergie Geant4')
         
-        # Position initiale au centre
+        # Figure
+        fig = plt.figure(figsize=(20, 10))
+        
+        # Layout : 75% ffor Slices, 25% for Control
+        main_height = 0.7
+        control_height = 0.25
+        
+        # Margins
+        left_margin = 0.05
+        right_margin = 0.12
+        top_margin = 0.05
+        
+        # Measurements for available space for Slices
+        available_width = 1 - left_margin - right_margin
+        spacing_between_images = 0.04  # Space between Slices
+        image_width = (available_width - 2 * spacing_between_images) / 3
+        
+        # Axes position
+        ax1_left = left_margin
+        ax2_left = left_margin + image_width + spacing_between_images
+        ax3_left = left_margin + 2 * (image_width + spacing_between_images)
+        
+        ax1 = fig.add_axes([ax1_left, control_height, image_width, main_height])  # XY
+        ax2 = fig.add_axes([ax2_left, control_height, image_width, main_height])  # XZ
+        ax3 = fig.add_axes([ax3_left, control_height, image_width, main_height])  # YZ
+        
+        # Colorbar position
+        cbar_left = ax3_left + image_width + 0.02
+        cbar_ax = fig.add_axes([cbar_left, control_height, 0.02, main_height])
+        
+        # Sliders below Slices
+        slider_width = image_width * 0.8  # 80% de la largeur de l'image
+        slider_height = 0.025
+        slider_y_pos = 0.15
+        
+        # Center Sliders under Slices
+        slider_z_left = ax1_left + (image_width - slider_width) / 2
+        slider_y_left = ax2_left + (image_width - slider_width) / 2
+        slider_x_left = ax3_left + (image_width - slider_width) / 2
+        
+        ax_slider_z = fig.add_axes([slider_z_left, slider_y_pos, slider_width, slider_height])
+        ax_slider_y = fig.add_axes([slider_y_left, slider_y_pos, slider_width, slider_height])
+        ax_slider_x = fig.add_axes([slider_x_left, slider_y_pos, slider_width, slider_height])
+        
+        # Stats zone
+        stats_y = 0.02
+        stats_height = 0.08
+        ax_stats = fig.add_axes([left_margin, stats_y, available_width, stats_height])
+        ax_stats.axis('off')
+        
+        fig.suptitle('Visualiseur de coupes interactif - Dépôt d\'énergie Geant4', fontsize=16, y=0.98)
+        
+        # Center initial position
         z_center = self.dim_size[2] // 2
         y_center = self.dim_size[1] // 2
         x_center = self.dim_size[0] // 2
         
-        # Coupes initiales
+        # Find min / max for color
+        vmin = np.min(self.data[self.data > 0]) if np.any(self.data > 0) else 0
+        vmax = np.max(self.data)
+        
+        # Initial Slices
         slice_xy = self.data[:, :, z_center]
         slice_xz = self.data[:, y_center, :]
         slice_yz = self.data[x_center, :, :]
         
-        # Affichage
-        im1 = axes[0].imshow(slice_xy.T, origin='lower', cmap='viridis')
-        axes[0].set_title(f'Coupe XY (z={z_center})')
-        axes[0].set_xlabel('X')
-        axes[0].set_ylabel('Y')
+        # Initial Display
+        im1 = ax1.imshow(slice_xy.T, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+        ax1.set_title(f'Coupe XY (z={z_center})', fontsize=14, pad=15)
+        ax1.set_xlabel('X (voxel)', fontsize=12)
+        ax1.set_ylabel('Y (voxel)', fontsize=12)
         
-        im2 = axes[1].imshow(slice_xz.T, origin='lower', cmap='viridis')
-        axes[1].set_title(f'Coupe XZ (y={y_center})')
-        axes[1].set_xlabel('X')
-        axes[1].set_ylabel('Z')
+        im2 = ax2.imshow(slice_xz.T, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+        ax2.set_title(f'Coupe XZ (y={y_center})', fontsize=14, pad=15)
+        ax2.set_xlabel('X (voxel)', fontsize=12)
+        ax2.set_ylabel('Z (voxel)', fontsize=12)
         
-        im3 = axes[2].imshow(slice_yz.T, origin='lower', cmap='viridis')
-        axes[2].set_title(f'Coupe YZ (x={x_center})')
-        axes[2].set_xlabel('Y')
-        axes[2].set_ylabel('Z')
+        im3 = ax3.imshow(slice_yz.T, origin='lower', cmap='viridis', vmin=vmin, vmax=vmax)
+        ax3.set_title(f'Coupe YZ (x={x_center})', fontsize=14, pad=15)
+        ax3.set_xlabel('Y (voxel)', fontsize=12)
+        ax3.set_ylabel('Z (voxel)', fontsize=12)
         
-        # Colorbars
-        plt.colorbar(im1, ax=axes[0], label='Énergie (MeV)')
-        plt.colorbar(im2, ax=axes[1], label='Énergie (MeV)')
-        plt.colorbar(im3, ax=axes[2], label='Énergie (MeV)')
+        # Colorbar
+        plt.colorbar(im1, cax=cbar_ax, label='Énergie (MeV)')
         
-        plt.tight_layout()
-        plt.show(block=False)  # Non-bloquant
-        print("Ferme la fenêtre des coupes pour continuer vers la visualisation 3D...")
+        # Create Sliders
+        slider_z = Slider(ax_slider_z, 'Z', 0, self.dim_size[2]-1, valinit=z_center, valfmt='%d', valstep=1)
+        slider_y = Slider(ax_slider_y, 'Y', 0, self.dim_size[1]-1, valinit=y_center, valfmt='%d', valstep=1)
+        slider_x = Slider(ax_slider_x, 'X', 0, self.dim_size[0]-1, valinit=x_center, valfmt='%d', valstep=1)
+        
+        # Variables to store stats
+        stats_text = ax_stats.text(0.02, 0.5, '', transform=ax_stats.transAxes, fontsize=9, verticalalignment='center', bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgray', alpha=0.8))
+        
+        def update_stats(slice_xy, slice_xz, slice_yz, z_idx, y_idx, x_idx):
+            """Met à jour les statistiques affichées de manière compacte"""
+            stats_xy = f"XY: max={np.max(slice_xy):.1e}, voxels={np.count_nonzero(slice_xy)}"
+            stats_xz = f"XZ: max={np.max(slice_xz):.1e}, voxels={np.count_nonzero(slice_xz)}"
+            stats_yz = f"YZ: max={np.max(slice_yz):.1e}, voxels={np.count_nonzero(slice_yz)}"
+            coords = f"Position: X={x_idx}, Y={y_idx}, Z={z_idx}"
+            
+            # One line stat format
+            stats_text.set_text(f"{coords} | {stats_xy} | {stats_xz} | {stats_yz}")
+        
+        # Update Z slider (slice XY)
+        def update_z(val):
+            z_idx = int(slider_z.val)
+            slice_xy = self.data[:, :, z_idx]
+            im1.set_array(slice_xy.T)
+            ax1.set_title(f'Coupe XY (z={z_idx})', fontsize=14, pad=10)
+            
+            # Stats update
+            y_idx = int(slider_y.val)
+            x_idx = int(slider_x.val)
+            slice_xz = self.data[:, y_idx, :]
+            slice_yz = self.data[x_idx, :, :]
+            update_stats(slice_xy, slice_xz, slice_yz, z_idx, y_idx, x_idx)
+            
+            fig.canvas.draw_idle()
+        
+        # Update Y slider (slice XZ)
+        def update_y(val):
+            y_idx = int(slider_y.val)
+            slice_xz = self.data[:, y_idx, :]
+            im2.set_array(slice_xz.T)
+            ax2.set_title(f'Coupe XZ (y={y_idx})', fontsize=14, pad=10)
+            
+            # Stats update
+            z_idx = int(slider_z.val)
+            x_idx = int(slider_x.val)
+            slice_xy = self.data[:, :, z_idx]
+            slice_yz = self.data[x_idx, :, :]
+            update_stats(slice_xy, slice_xz, slice_yz, z_idx, y_idx, x_idx)
+            
+            fig.canvas.draw_idle()
+        
+        # Update X slider (slice YZ)
+        def update_x(val):
+            x_idx = int(slider_x.val)
+            slice_yz = self.data[x_idx, :, :]
+            im3.set_array(slice_yz.T)
+            ax3.set_title(f'Coupe YZ (x={x_idx})', fontsize=14, pad=10)
+            
+            # Stats update
+            z_idx = int(slider_z.val)
+            y_idx = int(slider_y.val)
+            slice_xy = self.data[:, :, z_idx]
+            slice_xz = self.data[:, y_idx, :]
+            update_stats(slice_xy, slice_xz, slice_yz, z_idx, y_idx, x_idx)
+            
+            fig.canvas.draw_idle()
+        
+        # Connect sliders to update functions
+        slider_z.on_changed(update_z)
+        slider_y.on_changed(update_y)
+        slider_x.on_changed(update_x)
+        
+        # Display init stats
+        update_stats(slice_xy, slice_xz, slice_yz, z_center, y_center, x_center)
+        
+        # Instructions pour l'utilisateur
+        print("\n=== INSTRUCTIONS ===")
+        print("- Utilisez les sliders pour naviguer à travers les coupes")
+        print("- Coupe XY: varie Z (profondeur)")
+        print("- Coupe XZ: varie Y (hauteur)")
+        print("- Coupe YZ: varie X (largeur)")
+        print("- Les statistiques de chaque coupe sont affichées en bas")
+        print("- Fermez la fenêtre quand vous avez terminé")
+        
+        if block:
+            plt.show()  # Bloquant par défaut
+            print("Fenêtre fermée.")
+        else:
+            plt.show(block=False)
+            print("Fenêtre des coupes ouverte (non-bloquante).")
     
-    def plot_3d_matplotlib(self, threshold_percentile=90, show_all=False):
+    def plot_3d_matplotlib(self, threshold_percentile=90, show_all=False, block=True):
         """
         Visualisation 3D avec matplotlib (voxels)
         """
@@ -182,8 +321,13 @@ class Geant4Viewer:
         ax.set_title(f'Dépôt d\'énergie 3D {"(tous voxels)" if show_all else f"(>{threshold_percentile}e percentile)"}')
         
         plt.colorbar(scatter, label='Énergie déposée (MeV)')
-        plt.show(block=False)  # Non-bloquant
-        print("Ferme la fenêtre 3D matplotlib pour continuer...")
+        
+        if block:
+            plt.show()  # Bloquant par défaut
+            print("Fenêtre fermée.")
+        else:
+            plt.show(block=False)
+            print("Fenêtre 3D matplotlib ouverte (non-bloquante).")
     
     def plot_3d_plotly(self, threshold_percentile=85, show_all=False):
         """
@@ -241,9 +385,7 @@ class Geant4Viewer:
         )
         
         fig.show()
-    
 
-    
     def get_statistics(self):
         """
         Affiche les statistiques des données
@@ -342,7 +484,7 @@ if __name__ == "__main__":
             class DefaultArgs:
                 mode = 'menu'
                 show_all = False
-                threshold = 5
+                threshold = 50
             args = DefaultArgs()
         
         # Créer le visualiseur
@@ -364,20 +506,20 @@ if __name__ == "__main__":
             
             if choice == "1":
                 print("\nVisualiseur de coupes...")
-                viewer.plot_slice_viewer()
+                viewer.plot_slice_viewer(block=True)
             elif choice == "2":
                 print("\nVisualisation 3D (matplotlib)...")
-                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold, block=True)
             elif choice == "3":
                 print("\nVisualisation 3D interactive (Plotly)...")
                 viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
             elif choice == "4":
                 print("\n1. Visualiseur de coupes...")
-                viewer.plot_slice_viewer()
+                viewer.plot_slice_viewer(block=True)
                 
                 input("Appuie sur Entrée pour continuer vers la visualisation 3D matplotlib...")
                 print("\n2. Visualisation 3D (matplotlib)...")
-                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+                viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold, block=True)
                 
                 input("Appuie sur Entrée pour continuer vers la visualisation 3D interactive...")
                 print("\n3. Visualisation 3D interactive (Plotly)...")
@@ -386,15 +528,15 @@ if __name__ == "__main__":
                 print("Option invalide!")
                 
         elif args.mode == 'slices':
-            viewer.plot_slice_viewer()
+            viewer.plot_slice_viewer(block=True)
         elif args.mode == 'matplotlib':
-            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold, block=True)
         elif args.mode == 'plotly':
             viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
         elif args.mode == 'all':
-            viewer.plot_slice_viewer()
+            viewer.plot_slice_viewer(block=True)
             input("Appuie sur Entrée pour continuer...")
-            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold)
+            viewer.plot_3d_matplotlib(show_all=args.show_all, threshold_percentile=args.threshold, block=True)
             input("Appuie sur Entrée pour continuer...")
             viewer.plot_3d_plotly(show_all=args.show_all, threshold_percentile=args.threshold)
         
