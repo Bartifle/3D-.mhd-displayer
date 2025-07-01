@@ -10,7 +10,7 @@ import multiprocessing
 import signal
 
 class Geant4Viewer:
-    def __init__(self, mhd_file, raw_file=None):
+    def __init__(self, mhd_file, raw_file=None, downsample_factor=1, unit='MeV'):
         self.mhd_file = mhd_file
         if raw_file is None:
             if mhd_file.endswith('.mhd'):
@@ -27,6 +27,8 @@ class Geant4Viewer:
 
         self.data = None
         self.metadata = {}
+        self.unit = unit
+        self.downsample_factor = downsample_factor
         self.load_data()
 
     def parse_mhd_file(self):
@@ -35,6 +37,9 @@ class Geant4Viewer:
                 if '=' in line:
                     key, value = line.strip().split(' = ', 1)
                     self.metadata[key] = value
+
+        if self.metadata.get('NDims') != '3':
+            raise ValueError(f"Unsupported number of dimensions: {self.metadata.get('NDims')}. This application currently only supports 3D data.")
         
         self.dim_size = [int(x) for x in self.metadata['DimSize'].split()]
         self.element_spacing = [float(x) for x in self.metadata['ElementSpacing'].split()]
@@ -51,6 +56,12 @@ class Geant4Viewer:
         dims = self.dim_size
         self.data = data_array.reshape((dims[2], dims[1], dims[0]))
 
+        # If the Z-axis is 'Inferior', flip it to match the viewer's 'Superior' Z-axis.
+        # Because .mhd files I work with are all RAI
+        orientation = self.metadata.get('AnatomicalOrientation')
+        if orientation and len(orientation) == 3 and orientation[2] == 'I':
+            self.data = np.flip(self.data, axis=0)
+
     def calculate_statistics(self):
         stats = {}
         # From MHD metadata
@@ -59,11 +70,18 @@ class Geant4Viewer:
         stats['total_physical_volume'] = np.prod(np.array(self.dim_size) * np.array(self.element_spacing))
 
         # From RAW data
-        stats['min_energy'] = float(self.data.min())
-        stats['max_energy'] = float(self.data.max())
-        stats['total_deposited_energy'] = float(self.data.sum())
+        stats['min_value'] = float(self.data.min())
+        stats['max_value'] = float(self.data.max())
+        stats['total_value'] = float(self.data.sum())
+        stats['unit'] = self.unit
         
-        active_voxels_mask = self.data > 0
+        # The definition of an 'active' voxel should depend on the data type.
+        # For energy deposition (MeV), any voxel with energy is active.
+        # For CT scans (HU), we are generally interested in tissue and bone, not air.
+        # A good threshold to exclude most of the air is around -500 HU.
+        active_threshold = 0 if self.unit == 'MeV' else -500
+        active_voxels_mask = self.data > active_threshold
+
         stats['active_voxels_count'] = int(np.sum(active_voxels_mask))
         stats['total_voxels'] = int(np.prod(self.dim_size))
         stats['active_voxels_percentage'] = (stats['active_voxels_count'] / stats['total_voxels']) * 100 if stats['total_voxels'] > 0 else 0.0
@@ -73,6 +91,13 @@ class Geant4Viewer:
     def load_data(self):
         self.parse_mhd_file()
         self.load_raw_data()
+
+        if self.downsample_factor > 1:
+            self.data = self.data[::self.downsample_factor, ::self.downsample_factor, ::self.downsample_factor]
+            # Update metadata to reflect the new reality
+            self.dim_size = [self.data.shape[2], self.data.shape[1], self.data.shape[0]]
+            self.element_spacing = [s * self.downsample_factor for s in self.element_spacing]
+
         self.statistics = self.calculate_statistics()
 
     def run_slice_app(self):
@@ -85,6 +110,7 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
     app = dash.Dash(__name__, external_stylesheets=['/assets/style.css'])
     x_max, y_max, z_max = dim_size[0]-1, dim_size[1]-1, dim_size[2]-1
     x_center, y_center, z_center = x_max // 2, y_max // 2, z_max // 2
+    unit = statistics.get('unit', 'MeV')
 
     app.layout = html.Div(className='container', children=[
         html.H1("Interactive Slice Viewer", style={'textAlign': 'center'}),
@@ -94,8 +120,8 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
                 html.P(f"Dimensions: {statistics['dim_size'][0]}x{statistics['dim_size'][1]}x{statistics['dim_size'][2]} voxels"),
                 html.P(f"Voxel Spacing: {statistics['element_spacing'][0]:.2f}x{statistics['element_spacing'][1]:.2f}x{statistics['element_spacing'][2]:.2f} mm/voxel"),
                 html.P(f"Total Physical Volume: {statistics['total_physical_volume']:.2f} mm³"),
-                html.P(f"Energy Range: {statistics['min_energy']:.2e} - {statistics['max_energy']:.2e} MeV"),
-                html.P(f"Total Deposited Energy: {statistics['total_deposited_energy']:.2e} MeV"),
+                html.P(f"Value Range: {statistics['min_value']:.2e} - {statistics['max_value']:.2e} {unit}"),
+                html.P(f"Total Value: {statistics['total_value']:.2e} {unit}"),
                 html.P(f"Active Voxels: {statistics['active_voxels_count']} ({statistics['active_voxels_percentage']:.2f}%)"),
             ]),
             html.Div(className='graph-item', children=[
@@ -132,7 +158,7 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
         return {
             'data': [go.Heatmap(
                 z=data_slice, colorscale='Viridis', zmin=vmin, zmax=vmax,
-                colorbar=dict(title="Energy (MeV)", len=0.75)
+                colorbar=dict(title=f"Value ({unit})", len=0.75)
             )],
             'layout': go.Layout(
                 title=title, xaxis_title=x_label, yaxis_title=y_label,
@@ -227,6 +253,7 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
 
 def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show_all, threshold_percentile, port, debug_mode):
     app = dash.Dash(__name__, external_stylesheets=['/assets/style.css'])
+    unit = statistics.get('unit', 'MeV')
 
     # Pre-filter data once
     if np.any(data > 0):
@@ -250,8 +277,8 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
             html.P(f"Dimensions: {statistics['dim_size'][0]}x{statistics['dim_size'][1]}x{statistics['dim_size'][2]} voxels"),
             html.P(f"Voxel Spacing: {statistics['element_spacing'][0]:.2f}x{statistics['element_spacing'][1]:.2f}x{statistics['element_spacing'][2]:.2f} mm/voxel"),
             html.P(f"Total Physical Volume: {statistics['total_physical_volume']:.2f} mm³"),
-            html.P(f"Energy Range: {statistics['min_energy']:.2e} - {statistics['max_energy']:.2e} MeV"),
-            html.P(f"Total Deposited Energy: {statistics['total_deposited_energy']:.2e} MeV"),
+            html.P(f"Value Range: {statistics['min_value']:.2e} - {statistics['max_value']:.2e} {unit}"),
+            html.P(f"Total Value: {statistics['total_value']:.2e} {unit}"),
             html.P(f"Active Voxels: {statistics['active_voxels_count']} ({statistics['active_voxels_percentage']:.2f}%)"),
         ]),
         html.Div(className='slider-container', children=[
@@ -284,8 +311,8 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
 
         fig = go.Figure(data=go.Scatter3d(
             x=x_f, y=y_f, z=z_f, mode='markers',
-            marker=dict(size=3, color=values_f, colorscale='Plasma', colorbar=dict(title="Energy (MeV)"), opacity=opacity_value),
-            text=[f'E: {v:.2e} MeV' for v in values_f],
+            marker=dict(size=3, color=values_f, colorscale='Plasma', colorbar=dict(title=f"Value ({unit})"), opacity=opacity_value),
+            text=[f'Value: {v:.2e} {unit}' for v in values_f],
             hovertemplate='X: %{x:.1f} mm<br>Y: %{y:.1f} mm<br>Z: %{z:.1f} mm<br>%{text}<extra></extra>'
         ))
 
@@ -303,14 +330,16 @@ def parse_arguments():
     parser.add_argument('mhd_file', help='Path to the .mhd metadata file.')
     parser.add_argument('raw_file', nargs='?', help='Path to the .raw binary data file (optional).')
     parser.add_argument('--mode', choices=['slices', '3d', 'all'], default='all', help='Visualization mode.')
+    parser.add_argument('--unit', choices=['MeV', 'HU'], default='MeV', help='The unit of the data being loaded. Default: MeV.')
     parser.add_argument('--show-all', action='store_true', help='Show all voxels (no threshold).')
     parser.add_argument('--threshold', type=float, default=40, help='Percentile threshold for filtering voxels (default: 85).')
+    parser.add_argument('--downsample', type=int, default=1, help='Downsample by factor N. Takes every Nth voxel. Default is 1 (no downsampling).')
     return parser.parse_args()
 
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-        viewer = Geant4Viewer(args.mhd_file, args.raw_file)
+        viewer = Geant4Viewer(args.mhd_file, args.raw_file, args.downsample, args.unit)
 
         if args.mode == 'slices':
             viewer.run_slice_app()
