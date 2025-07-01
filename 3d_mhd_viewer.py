@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 import dash
-from dash import dcc, html
+from dash import dcc, html, Patch
 from dash.dependencies import Input, Output, State
 import multiprocessing
 import signal
@@ -254,8 +254,9 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
 def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show_all, threshold_percentile, port, debug_mode):
     app = dash.Dash(__name__, external_stylesheets=['/assets/style.css'])
     unit = statistics.get('unit', 'MeV')
+    min_val, max_val = statistics['min_value'], statistics['max_value']
 
-    # Pre-filter data once
+    # Pre-filter data once based on the initial threshold
     if np.any(data > 0):
         mask = data > 0 if show_all else data > np.percentile(data[data > 0], threshold_percentile)
     else:
@@ -269,6 +270,19 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
 
     x_filtered, y_filtered, z_filtered = xx[mask], yy[mask], zz[mask]
     values_filtered = data[mask]
+
+    # Create the initial figure
+    initial_fig = go.Figure(data=go.Scatter3d(
+        x=x_filtered, y=y_filtered, z=z_filtered, mode='markers',
+        marker=dict(size=3, color=values_filtered, colorscale='Plasma', colorbar=dict(title=f"Value ({unit})"), opacity=0.2),
+        text=[f'Value: {v:.2e} {unit}' for v in values_filtered],
+        hovertemplate='X: %{x:.1f} mm<br>Y: %{y:.1f} mm<br>Z: %{z:.1f} mm<br>%{text}<extra></extra>'
+    ))
+    initial_fig.update_layout(
+        title='3D Interactive Visualization',
+        scene=dict(xaxis_title='X (mm)', yaxis_title='Y (mm)', zaxis_title='Z (mm)', aspectmode='data'),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
 
     app.layout = html.Div(className='container three-d-viewer-layout', children=[
         html.H1("3D Viewer", style={'textAlign': 'center'}),
@@ -289,7 +303,16 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
                 marks={i/10: str(i/10) for i in range(0, 11, 2)}
             ),
         ]),
-        dcc.Graph(id='3d-plot', className='graph-3d'),
+        html.Div(className='slider-container', children=[
+            html.P(f"Value Range ({unit}):"),
+            dcc.RangeSlider(
+                id='value-range-slider',
+                min=min_val, max=max_val, value=[min_val, max_val],
+                marks=None,
+                tooltip={"placement": "bottom", "always_visible": True}
+            ),
+        ]),
+        dcc.Graph(id='3d-plot', className='graph-3d', figure=initial_fig),
         dcc.Store(id='filtered-data-store', data={
             'x': x_filtered.tolist(),
             'y': y_filtered.tolist(),
@@ -300,28 +323,34 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
 
     @app.callback(
         Output('3d-plot', 'figure'),
-        [Input('opacity-slider', 'value')],
-        [State('filtered-data-store', 'data')]
+        Input('opacity-slider', 'value'),
+        Input('value-range-slider', 'value'),
+        State('filtered-data-store', 'data'),
+        prevent_initial_call=True
     )
-    def update_3d_plot_opacity(opacity_value, filtered_data):
-        x_f = np.array(filtered_data['x'])
-        y_f = np.array(filtered_data['y'])
-        z_f = np.array(filtered_data['z'])
-        values_f = np.array(filtered_data['values'])
+    def update_3d_plot_properties(opacity_value, value_range, filtered_data):
+        patched_figure = Patch()
 
-        fig = go.Figure(data=go.Scatter3d(
-            x=x_f, y=y_f, z=z_f, mode='markers',
-            marker=dict(size=3, color=values_f, colorscale='Plasma', colorbar=dict(title=f"Value ({unit})"), opacity=opacity_value),
-            text=[f'Value: {v:.2e} {unit}' for v in values_f],
-            hovertemplate='X: %{x:.1f} mm<br>Y: %{y:.1f} mm<br>Z: %{z:.1f} mm<br>%{text}<extra></extra>'
-        ))
+        x_all = np.array(filtered_data['x'])
+        y_all = np.array(filtered_data['y'])
+        z_all = np.array(filtered_data['z'])
+        values_all = np.array(filtered_data['values'])
 
-        fig.update_layout(
-            title=f'3D Interactive Visualization',
-            scene=dict(xaxis_title='X (mm)', yaxis_title='Y (mm)', zaxis_title='Z (mm)', aspectmode='data'),
-            margin=dict(l=0, r=0, b=0, t=40)
-        )
-        return fig
+        value_mask = (values_all >= value_range[0]) & (values_all <= value_range[1])
+        
+        x_display = x_all[value_mask]
+        y_display = y_all[value_mask]
+        z_display = z_all[value_mask]
+        values_display = values_all[value_mask]
+
+        patched_figure['data'][0]['x'] = x_display
+        patched_figure['data'][0]['y'] = y_display
+        patched_figure['data'][0]['z'] = z_display
+        patched_figure['data'][0]['marker']['color'] = values_display
+        patched_figure['data'][0]['marker']['opacity'] = opacity_value
+        patched_figure['data'][0]['text'] = [f'Value: {v:.2e} {unit}' for v in values_display]
+
+        return patched_figure
 
     app.run(debug=debug_mode, port=port)
 
