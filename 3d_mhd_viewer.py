@@ -112,7 +112,7 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
     x_center, y_center, z_center = x_max // 2, y_max // 2, z_max // 2
     unit = statistics.get('unit', 'MeV')
 
-    app.layout = html.Div(className='container', children=[
+    app.layout = html.Div(className='container slice-viewer-layout', children=[
         html.H1("Interactive Slice Viewer", style={'textAlign': 'center'}),
         html.Div(className='graph-container', children=[
             html.Div(className='statistics-box', children=[
@@ -124,30 +124,32 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
                 html.P(f"Total Value: {statistics['total_value']:.2e} {unit}"),
                 html.P(f"Active Voxels: {statistics['active_voxels_count']} ({statistics['active_voxels_percentage']:.2f}%)"),
             ]),
-            html.Div(className='graph-item', children=[
-                dcc.Graph(id='slice-xy'),
-                html.P("Z-Slice"),
-                html.Div(className='slider-input-group', children=[
-                    dcc.Slider(id='slider-z', min=0, max=z_max, value=z_center, step=1, marks=None),
-                    dcc.Input(id='input-z', type='number', min=0, max=z_max, value=z_center, step=1, style={'width': '100%'}),
+            html.Div(className='slice-cards-container', children=[
+                html.Div(className='graph-item', children=[
+                    dcc.Graph(id='slice-xy', className='graph'),
+                    html.P("Z-Slice"),
+                    html.Div(className='slider-input-group', children=[
+                        dcc.Slider(id='slider-z', min=0, max=z_max, value=z_center, step=1, marks=None),
+                        dcc.Input(id='input-z', type='number', min=0, max=z_max, value=z_center, step=1, style={'width': '100%'}),
+                    ]),
                 ]),
-            ]),
-            html.Div(className='graph-item', children=[
-                dcc.Graph(id='slice-xz'),
-                html.P("Y-Slice"),
-                html.Div(className='slider-input-group', children=[
-                    dcc.Slider(id='slider-y', min=0, max=y_max, value=y_center, step=1, marks=None),
-                    dcc.Input(id='input-y', type='number', min=0, max=y_max, value=y_center, step=1, style={'width': '100%'}),
+                html.Div(className='graph-item', children=[
+                    dcc.Graph(id='slice-xz', className='graph'),
+                    html.P("Y-Slice"),
+                    html.Div(className='slider-input-group', children=[
+                        dcc.Slider(id='slider-y', min=0, max=y_max, value=y_center, step=1, marks=None),
+                        dcc.Input(id='input-y', type='number', min=0, max=y_max, value=y_center, step=1, style={'width': '100%'}),
+                    ]),
                 ]),
-            ]),
-            html.Div(className='graph-item', children=[
-                dcc.Graph(id='slice-yz'),
-                html.P("X-Slice"),
-                html.Div(className='slider-input-group', children=[
-                    dcc.Slider(id='slider-x', min=0, max=x_max, value=x_center, step=1, marks=None),
-                    dcc.Input(id='input-x', type='number', min=0, max=x_max, value=x_center, step=1, style={'width': '100%'}),
+                html.Div(className='graph-item', children=[
+                    dcc.Graph(id='slice-yz', className='graph'),
+                    html.P("X-Slice"),
+                    html.Div(className='slider-input-group', children=[
+                        dcc.Slider(id='slider-x', min=0, max=x_max, value=x_center, step=1, marks=None),
+                        dcc.Input(id='input-x', type='number', min=0, max=x_max, value=x_center, step=1, style={'width': '100%'}),
+                    ]),
                 ]),
-            ]),
+            ])
         ])
     ])
 
@@ -163,7 +165,8 @@ def _run_slice_app_process(data, dim_size, element_spacing, statistics, port, de
             'layout': go.Layout(
                 title=title, xaxis_title=x_label, yaxis_title=y_label,
                 yaxis=dict(scaleanchor='x', scaleratio=aspect_ratio),
-                margin=dict(l=40, r=40, b=40, t=40)
+                margin=dict(l=40, r=40, b=40, t=40),
+                autosize=True
             )
         }
 
@@ -295,22 +298,24 @@ def run_3d_app_process(data, dim_size, element_spacing, offset, statistics, show
             html.P(f"Total Value: {statistics['total_value']:.2e} {unit}"),
             html.P(f"Active Voxels: {statistics['active_voxels_count']} ({statistics['active_voxels_percentage']:.2f}%)"),
         ]),
-        html.Div(className='slider-container', children=[
-            html.P("Opacity:"),
-            dcc.Slider(
-                id='opacity-slider',
-                min=0, max=1, value=0.2, step=0.05,
-                marks={i/10: str(i/10) for i in range(0, 11, 2)}
-            ),
-        ]),
-        html.Div(className='slider-container', children=[
-            html.P(f"Value Range ({unit}):"),
-            dcc.RangeSlider(
-                id='value-range-slider',
-                min=min_val, max=max_val, value=[min_val, max_val],
-                marks=None,
-                tooltip={"placement": "bottom", "always_visible": True}
-            ),
+        html.Div(className='sliders-wrapper', children=[
+            html.Div(className='slider-container', children=[
+                html.P("Opacity:"),
+                dcc.Slider(
+                    id='opacity-slider',
+                    min=0, max=1, value=0.2, step=0.05,
+                    marks={i/10: str(i/10) for i in range(0, 11, 2)}
+                ),
+            ]),
+            html.Div(className='slider-container', children=[
+                html.P(f"Value Range ({unit}):"),
+                dcc.RangeSlider(
+                    id='value-range-slider',
+                    min=min_val, max=max_val, value=[min_val, max_val],
+                    marks=None,
+                    tooltip={"placement": "bottom", "always_visible": True}
+                ),
+            ]),
         ]),
         dcc.Graph(id='3d-plot', className='graph-3d', figure=initial_fig),
         dcc.Store(id='filtered-data-store', data={
