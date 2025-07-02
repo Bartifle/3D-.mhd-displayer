@@ -2,8 +2,7 @@
 
 A lightweight, browser-based viewer for 3D data in the `.mhd` and `.raw` formats, commonly used for Geant4 simulation output and medical imaging.
 
-_(Image: Screenshot of the 3D Point Cloud Viewer)_
-_(Image: Screenshot of the Interactive Slice Viewer)_
+![Project Screenshot](assets/screenshot.png)
 
 ## About The Project
 
